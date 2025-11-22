@@ -53,7 +53,6 @@ def generate_egyptian_phone():
 
 
 def generate_driver():
-    """Generate realistic driver data for Egypt."""
     first = fake.first_name()
     last = fake.last_name()
     dob = fake.date_of_birth(minimum_age=22, maximum_age=60)
@@ -79,7 +78,6 @@ def generate_driver():
 used_plates = set()
 
 def generate_vehicle(driver_id):
-    """Generate unique Egyptian-style vehicle plate linked to a driver."""
     while True:
         plate_number = f"EGY-{random.randint(1000, 9999)}-{random.randint(10,99)}"
         if plate_number not in used_plates:
@@ -143,15 +141,36 @@ def generate_scan(vehicle_id, camera_id, road_id, vehicle_type, max_speed):
     lane = random.randint(1, 4)
     gps_long = round(random.uniform(29.0, 33.0), 6)
     gps_lat = round(random.uniform(25.0, 31.0), 6)
-    recorded_speed = round(random.uniform(max_speed * 0.7, max_speed * 1.4), 2)
+    
+    # --- Logic for Violations ---
+    
+    # 1. Speed Flag (SF_Flag)
+    # 70% chance legal speed, 30% chance speeding
+    if random.random() < 0.7:
+        recorded_speed = round(random.uniform(max_speed * 0.5, max_speed), 2)
+        sf_flag = 0  # Legal
+    else:
+        recorded_speed = round(random.uniform(max_speed * 1.01, max_speed * 1.6), 2)
+        sf_flag = 1  # Violation
 
-    legal_flag = 1 if recorded_speed <= max_speed else 0
-    sf_flag = 1 if recorded_speed > max_speed * 1.2 else 0
-    sb_flag = 1 if recorded_speed > max_speed * 1.4 else 0
+    # 2. Seatbelt Flag (SB_Flag)
+    # 10% chance of not wearing a seatbelt
+    sb_flag = 1 if random.random() < 0.10 else 0
+
+    # 3. Phone Usage Flag (PH_Flag) - NEW!
+    # 15% chance of using phone while driving
+    ph_flag = 1 if random.random() < 0.15 else 0
+
+    # 4. Legal Flag (NOR Logic)
+    # If ANY violation flag is 1, Legal_Flag is 0.
+    if sf_flag == 1 or sb_flag == 1 or ph_flag == 1:
+        legal_flag = 0
+    else:
+        legal_flag = 1
 
     return (
         vehicle_id, camera_id, scan_time, lane,
-        gps_long, gps_lat, recorded_speed, legal_flag, sf_flag, sb_flag
+        gps_long, gps_lat, recorded_speed, legal_flag, sf_flag, sb_flag, ph_flag
     )
 
 
@@ -162,9 +181,11 @@ def insert_data():
     cnxn = pyodbc.connect(CONNECTION_STRING)
     cursor = cnxn.cursor()
 
-    # Optional: Clear tables before inserting (for re-runs)
+    # Clear tables
     print("🧹 Clearing old data...")
+    cursor.execute("DELETE FROM CITATION")
     cursor.execute("DELETE FROM SCAN")
+    cursor.execute("DELETE FROM VIOLATION")
     cursor.execute("DELETE FROM SPEED_LIMIT")
     cursor.execute("DELETE FROM CAMERA")
     cursor.execute("DELETE FROM ROAD")
@@ -172,7 +193,7 @@ def insert_data():
     cursor.execute("DELETE FROM DRIVER")
     cnxn.commit()
 
-    # DRIVER
+    # 1. DRIVER
     print("🚗 Inserting drivers...")
     fake.unique.clear()
     drivers = [generate_driver() for _ in range(NUM_DRIVERS)]
@@ -183,11 +204,11 @@ def insert_data():
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, drivers)
     cnxn.commit()
-
+    
     cursor.execute("SELECT Driver_ID FROM DRIVER")
     driver_ids = [r[0] for r in cursor.fetchall()]
 
-    # VEHICLE
+    # 2. VEHICLE
     print("🚙 Inserting vehicles...")
     vehicles = [generate_vehicle(random.choice(driver_ids)) for _ in range(NUM_VEHICLES)]
     cursor.executemany("""
@@ -196,11 +217,11 @@ def insert_data():
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """, vehicles)
     cnxn.commit()
-
+    
     cursor.execute("SELECT Vehicle_ID, Vehicle_Type FROM VEHICLE")
     vehicle_data = cursor.fetchall()
 
-    # ROAD
+    # 3. ROAD
     print("🛣️ Inserting roads...")
     roads = [generate_road() for _ in range(NUM_ROADS)]
     cursor.executemany("""
@@ -209,11 +230,11 @@ def insert_data():
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, roads)
     cnxn.commit()
-
+    
     cursor.execute("SELECT Road_ID FROM ROAD")
     road_ids = [r[0] for r in cursor.fetchall()]
 
-    # CAMERA
+    # 4. CAMERA
     print("📷 Inserting cameras...")
     cameras = [generate_camera(random.choice(road_ids)) for _ in range(NUM_CAMERAS)]
     cursor.executemany("""
@@ -222,11 +243,11 @@ def insert_data():
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, cameras)
     cnxn.commit()
-
+    
     cursor.execute("SELECT Camera_ID, Road_ID FROM CAMERA")
     camera_data = cursor.fetchall()
 
-    # SPEED LIMIT
+    # 5. SPEED LIMIT
     print("🚦 Inserting speed limits...")
     speed_limits = [generate_speed_limit(random.choice(road_ids)) for _ in range(NUM_SPEED_LIMITS)]
     cursor.executemany("""
@@ -235,10 +256,11 @@ def insert_data():
     """, speed_limits)
     cnxn.commit()
 
+    # Build Lookup: (Road_ID, Vehicle_Type) -> Max_Speed
     cursor.execute("SELECT Road_ID, Vehicle_Type, Max_Speed FROM SPEED_LIMIT")
     speed_lookup = {(r[0], r[1]): r[2] for r in cursor.fetchall()}
 
-    # SCAN
+    # 6. SCAN
     print("📸 Generating scans...")
     scans = []
     for _ in range(NUM_SCANS):
@@ -247,20 +269,118 @@ def insert_data():
         max_speed = speed_lookup.get((road_id, v_type), random.randint(80, 120))
         scans.append(generate_scan(vehicle_id, camera_id, road_id, v_type, max_speed))
 
+    # NOTE: Added PH_Flag to query
     cursor.executemany("""
         INSERT INTO SCAN (Vehicle_ID, Camera_ID, Scan_DateTime, Lane_Number,
-        GPS_Longitude, GPS_Latitude, Speed_Recorded, Legal_Flag, SF_Flag, SB_Flag)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        GPS_Longitude, GPS_Latitude, Speed_Recorded, Legal_Flag, SF_Flag, SB_Flag, PH_Flag)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, scans)
     cnxn.commit()
 
-    cnxn.close()
-    print("✅ All data inserted successfully and consistently!")
+    # 7. VIOLATION (Added Phone Usage)
+    print("📜 Inserting violations...")
+    violation_types = [
+        ("SPD01", "Speeding (Low)", "Exceeding limit by < 20%", 0, 150.00, 1, "Active"),
+        ("SPD02", "Speeding (High)", "Exceeding limit by > 20%", 3, 300.00, 1, "Active"),
+        ("SBT01", "No Seatbelt", "Driver failed to wear seatbelt", 1, 100.00, 1, "Active"),
+        ("PHN01", "Phone Usage", "Using handheld mobile device", 3, 500.00, 1, "Active")
+    ]
+    cursor.executemany("""
+        INSERT INTO VIOLATION (Violation_Code, Violation_Type, Description, Points, Base_Fine, Active_Flag, Status)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, violation_types)
+    cnxn.commit()
 
+    # Map codes to (ID, Fine)
+    cursor.execute("SELECT Violation_ID, Violation_Code, Base_Fine FROM VIOLATION")
+    viol_map = {row.Violation_Code: (row.Violation_ID, float(row.Base_Fine)) for row in cursor.fetchall()}
+
+    # 8. CITATION
+    print("📝 Generating citations...")
+    
+    # Updated Query to include PH_Flag
+    sql_query = """
+        SELECT 
+            S.Scan_ID, S.Scan_DateTime, S.SF_Flag, S.SB_Flag, S.PH_Flag, S.Speed_Recorded, 
+            V.Vehicle_Type, C.Road_ID
+        FROM SCAN S
+        JOIN VEHICLE V ON S.Vehicle_ID = V.Vehicle_ID
+        JOIN CAMERA C ON S.Camera_ID = C.Camera_ID
+        WHERE S.Legal_Flag = 0
+    """
+    cursor.execute(sql_query)
+    illegal_scans = cursor.fetchall()
+
+    citations = []
+    for row in illegal_scans:
+        scan_id, scan_dt, sf_flag, sb_flag, ph_flag, recorded_speed, v_type, road_id = row
+
+        violations_to_issue = []
+
+        # -- Check Speed Flag --
+        if sf_flag:
+            limit = speed_lookup.get((road_id, v_type), 90.0) 
+            limit = float(limit)
+            recorded_speed = float(recorded_speed)
+            
+            if recorded_speed > limit * 1.2:
+                violations_to_issue.append("SPD02")
+            else:
+                violations_to_issue.append("SPD01")
+
+        # -- Check Seatbelt Flag --
+        if sb_flag:
+            violations_to_issue.append("SBT01")
+
+        # -- Check Phone Flag (NEW) --
+        if ph_flag:
+            violations_to_issue.append("PHN01")
+
+        # Create citation for EACH violation
+        for v_code in violations_to_issue:
+            viol_id, fine_amount = viol_map[v_code]
+            citation_date = scan_dt.date()
+            citation_time = scan_dt.time()
+            due_date = citation_date + timedelta(days=14)
+            
+            # Payment Simulation
+            rand_pay = random.random()
+            late_fee = 0.0
+            payment_date = None
+
+            if rand_pay < 0.60: # Paid on time
+                payment_date = citation_date + timedelta(days=random.randint(0, 13))
+            elif rand_pay < 0.80: # Paid Late
+                payment_date = due_date + timedelta(days=random.randint(1, 20))
+                late_fee = 100.00
+            else: # Unpaid
+                payment_date = None
+                if datetime.now().date() > due_date:
+                    late_fee = 100.00
+
+            total_amount = fine_amount + late_fee
+            
+            citations.append((
+                scan_id, viol_id, citation_date, citation_time,
+                fine_amount, late_fee, total_amount, due_date, payment_date
+            ))
+
+    if citations:
+        cursor.executemany("""
+            INSERT INTO CITATION (Scan_ID, Violation_ID, Citation_Date, Citation_Time,
+            Fine_Amount, Late_Fee, Total_Amount, Payment_Due_Date, Payment_Date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, citations)
+        cnxn.commit()
+        print(f"✅ Generated {len(citations)} citations from illegal scans.")
+    else:
+        print("ℹ️ No illegal scans found.")
+
+    cnxn.close()
+    print("✅ All data inserted successfully!")
 
 # -----------------------------
 # 5️⃣ Run
 # -----------------------------
 if __name__ == "__main__":
     insert_data()
-

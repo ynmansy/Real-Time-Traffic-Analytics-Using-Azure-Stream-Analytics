@@ -1,4 +1,3 @@
-
 ------------------------------------------------------------------------------------
 -- 0. DATABASE CREATION AND SELECTION
 ------------------------------------------------------------------------------------
@@ -100,7 +99,7 @@ CREATE TABLE dbo.VIOLATION (
     Violation_ID INT IDENTITY(1,1) PRIMARY KEY,
     Violation_Code VARCHAR(50) UNIQUE,
     Violation_Type VARCHAR(50),
-    Description VARCHAR(MAX), -- Using VARCHAR(MAX) for 'text' field -- m3rf4 'text' dy mawgoda wla l2 fa 3mlt varchar max :)
+    Description VARCHAR(MAX), 
     Points INT,
     Base_Fine DECIMAL(10, 2),
     Active_Flag BIT,
@@ -108,6 +107,7 @@ CREATE TABLE dbo.VIOLATION (
 );
 
 -- SCAN Table (Links to VEHICLE and CAMERA)
+-- UPDATED: Added PH_Flag for Phone Usage
 CREATE TABLE dbo.SCAN (
     Scan_ID INT IDENTITY(1,1) PRIMARY KEY,
     Vehicle_ID INT NOT NULL, -- Foreign Key to VEHICLE
@@ -117,9 +117,10 @@ CREATE TABLE dbo.SCAN (
     GPS_Longitude DECIMAL(10, 6),
     GPS_Latitude DECIMAL(10, 6),
     Speed_Recorded DECIMAL(5, 2),
-	Legal_Flag BIT, 
-	SF_Flag BIT,
-    SB_Flag BIT
+    Legal_Flag BIT, -- 0 if ANY violation occurred, 1 if clean
+    SF_Flag BIT,    -- Speed Flag (1 = Violation)
+    SB_Flag BIT,    -- Seatbelt Flag (1 = Violation)
+    PH_Flag BIT     -- Phone Usage Flag (1 = Violation) [NEW]
 );
 
 -- CITATION Table (Links to SCAN and VIOLATION)
