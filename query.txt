@@ -1,0 +1,73 @@
+SELECT
+    event_id,
+    System.Timestamp AS AnalysisTime,
+    -- Vehicle Info
+    vehicle_data.plate_number,
+    vehicle_data.vehicle_type,   
+    vehicle_data.model,          
+    vehicle_data.color,
+    -- Telemetry / Violations
+    telemetry.speed,
+    telemetry.is_speeding,       
+    telemetry.using_phone,       
+    telemetry.no_seatbelt,
+    -- Camera Info
+    camera_data.speed_limit,
+    camera_data.road_name,
+    camera_data.location_description
+INTO
+    [SpeedingAlertsDB]
+FROM
+    [TrafficStream]
+WHERE
+    telemetry.is_speeding = 1 
+    OR telemetry.no_seatbelt = 1 
+    OR telemetry.using_phone = 1
+
+
+
+    /* ---------------------------------------------------------
+   OUTPUT: Power BI Dashboard (With Revenue & Analysis)
+   --------------------------------------------------------- */
+SELECT
+    -- 1. Vehicle Demographics (For "Worst Offenders" & "Regional Analysis")
+    vehicle_data.plate_number,
+    vehicle_data.vehicle_type,      -- (Car, Truck, Bus)
+    vehicle_data.model,
+    vehicle_data.registration_state, -- (Cairo, Alex, etc.)
+    vehicle_data.year AS vehicle_year,
+
+    -- 2. Location (For "Danger Zones")
+    camera_data.road_name,
+    camera_data.speed_limit,
+
+    -- 3. Behavioral Data (For "Distracted Driving")
+    telemetry.speed,
+    telemetry.using_phone,          -- 1 or 0
+    telemetry.no_seatbelt,          -- 1 or 0
+
+    -- 4. Calculated Field: Primary Violation Reason
+    CASE
+        WHEN telemetry.using_phone = 1 THEN 'Phone Usage'
+        WHEN telemetry.is_speeding = 1 THEN 'Speeding'
+        WHEN telemetry.no_seatbelt = 1 THEN 'No Seatbelt'
+        ELSE 'Unknown'
+    END AS Violation_Type,
+
+    -- 5. Calculated Field: Estimated Revenue (Fine Amount)
+    CASE
+        WHEN telemetry.using_phone = 1 THEN 500  -- High fine for phone
+        WHEN telemetry.is_speeding = 1 THEN 300  -- Medium fine for speeding
+        WHEN telemetry.no_seatbelt = 1 THEN 100  -- Low fine for seatbelt
+        ELSE 0
+    END AS Fine_Amount,
+
+    System.Timestamp AS Time
+INTO
+    [PowerBIStream]                 -- Make sure this matches your Output Name!
+FROM
+    [TrafficStream]            -- Make sure this matches your Input Name!
+WHERE
+    telemetry.is_speeding = 1 
+    OR telemetry.no_seatbelt = 1 
+    OR telemetry.using_phone = 1
