@@ -1,0 +1,7 @@
+Task						Contributors
+Database Design & ER Diagram			Youssef & Ehab
+Database Schema					Ashrakat & Randa
+Database creation query				Youssef
+Python script for random data generation	All
+Python script and query for Azure Stream	Ehab
+Data visualization using Power BI		Youssef & Ehab
