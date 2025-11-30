@@ -29,44 +29,65 @@ WHERE
     /* ---------------------------------------------------------
    OUTPUT: Power BI Dashboard (With Revenue & Analysis)
    --------------------------------------------------------- */
+/* FINAL MERGED QUERY
+   Destination: Power BI
+   Contains: All Metrics, Text Labels, and Financial Calculations
+*/
+
 SELECT
-    -- 1. Vehicle Demographics (For "Worst Offenders" & "Regional Analysis")
+    -- 1. IDs & Time
+    event_id,
+    System.Timestamp AS time,
+
+    -- 2. Vehicle Demographics (For Tree Map & Profiling)
     vehicle_data.plate_number,
-    vehicle_data.vehicle_type,      -- (Car, Truck, Bus)
+    vehicle_data.vehicle_type,
     vehicle_data.model,
-    vehicle_data.registration_state, -- (Cairo, Alex, etc.)
+    vehicle_data.registration_state,
     vehicle_data.year AS vehicle_year,
 
-    -- 2. Location (For "Danger Zones")
+    -- 3. Location Data
     camera_data.road_name,
     camera_data.speed_limit,
 
-    -- 3. Behavioral Data (For "Distracted Driving")
+    -- 4. Raw Telemetry (Useful for numeric averages)
     telemetry.speed,
-    telemetry.using_phone,          -- 1 or 0
-    telemetry.no_seatbelt,          -- 1 or 0
+    telemetry.using_phone,    -- 1 or 0
+    telemetry.no_seatbelt,    -- 1 or 0
+    telemetry.is_speeding,    -- 1 or 0
 
-    -- 4. Calculated Field: Primary Violation Reason
+    -- 5. Chart Labels: Status (For "Distracted & Dangerous" Chart)
+    CASE 
+        WHEN telemetry.is_speeding = 1 THEN 'Speeding' 
+        ELSE 'Legal Speed' 
+    END AS Speeding_Status,
+    
+    CASE 
+        WHEN telemetry.using_phone = 1 THEN 'Using Phone' 
+        ELSE 'Focused' 
+    END AS Phone_Status,
+
+    -- 6. Chart Labels: Primary Violation (For Pie Charts)
+    -- Logic: Priority is Phone > Speeding > Seatbelt
     CASE
         WHEN telemetry.using_phone = 1 THEN 'Phone Usage'
         WHEN telemetry.is_speeding = 1 THEN 'Speeding'
         WHEN telemetry.no_seatbelt = 1 THEN 'No Seatbelt'
         ELSE 'Unknown'
-    END AS Violation_Type,
+    END AS Primary_Violation,
 
-    -- 5. Calculated Field: Estimated Revenue (Fine Amount)
+    -- 7. Financials: Estimated Revenue (For Card Visuals)
     CASE
-        WHEN telemetry.using_phone = 1 THEN 500  -- High fine for phone
-        WHEN telemetry.is_speeding = 1 THEN 300  -- Medium fine for speeding
-        WHEN telemetry.no_seatbelt = 1 THEN 100  -- Low fine for seatbelt
+        WHEN telemetry.using_phone = 1 THEN 500  -- EGP
+        WHEN telemetry.is_speeding = 1 THEN 300
+        WHEN telemetry.no_seatbelt = 1 THEN 100
         ELSE 0
-    END AS Fine_Amount,
+    END AS Fine_Amount
 
-    System.Timestamp AS Time
 INTO
-    [PowerBIStream]                 -- Make sure this matches your Output Name!
+    [PowerBIStream]
 FROM
-    [TrafficStream]            -- Make sure this matches your Input Name!
+    [TrafficStream]
 WHERE
     telemetry.is_speeding = 1 
     OR telemetry.no_seatbelt = 1 
